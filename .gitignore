@@ -11,9 +11,13 @@
 # next.js
 /.next/
 /out/
+/bootstrap-app/
 
 # production
 /build
+/data/*.sqlite
+/data/**/*.sqlite
+/data/*.db
 
 # misc
 .DS_Store

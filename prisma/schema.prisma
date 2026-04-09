@@ -1,0 +1,172 @@
+generator client {
+  provider   = "prisma-client-js"
+  engineType = "binary"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Family {
+  id              String          @id
+  name            String
+  code            String          @unique
+  joinPolicy      String          @map("join_policy")
+  defaultServings Int             @default(3) @map("default_servings")
+  createdAt       String          @map("created_at")
+  members         Member[]
+  dinnerRequests  DinnerRequest[]
+  recipes         Recipe[]
+  menus           Menu[]
+
+  @@map("families")
+}
+
+model Member {
+  id               String          @id
+  familyId         String          @map("family_id")
+  nickname         String
+  role             String
+  isOwner          Boolean         @default(false) @map("is_owner")
+  status           String
+  createdAt        String          @map("created_at")
+  family           Family          @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  dinnerRequests   DinnerRequest[]
+  publishedMenus   Menu[]          @relation("PublishedMenus")
+  dishFeedback     DishFeedback[]
+
+  @@map("members")
+}
+
+model DinnerRequest {
+  id                  String   @id
+  familyId            String   @map("family_id")
+  memberId            String   @map("member_id")
+  dinnerDate          String   @map("dinner_date")
+  desiredDishes       String   @default("[]") @map("desired_dishes")
+  dislikes            String   @default("[]")
+  flavorPreference    String   @default("正常就好") @map("flavor_preference")
+  portionPreference   String   @default("刚刚好") @map("portion_preference")
+  tagPreferences      String   @default("[]") @map("tag_preferences")
+  needsRecommendation Boolean  @default(true) @map("needs_recommendation")
+  createdAt           String   @map("created_at")
+  updatedAt           String   @map("updated_at")
+  family              Family   @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  member              Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([familyId, memberId, dinnerDate])
+  @@map("dinner_requests")
+}
+
+model Recipe {
+  id              String             @id
+  familyId        String             @map("family_id")
+  name            String
+  source          String
+  defaultServings Int                @default(3) @map("default_servings")
+  createdAt       String             @map("created_at")
+  updatedAt       String             @map("updated_at")
+  lastCookedAt    String?            @map("last_cooked_at")
+  family          Family             @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  ingredients     RecipeIngredient[]
+  tags            RecipeTag[]
+  menuItems       MenuItem[]
+
+  @@map("recipes")
+}
+
+model RecipeIngredient {
+  id             String   @id
+  recipeId       String   @map("recipe_id")
+  ingredientName String   @map("ingredient_name")
+  grams          Int      @default(0)
+  unit           String   @default("g")
+  optional       Boolean  @default(false)
+  recipe         Recipe   @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+
+  @@map("recipe_ingredients")
+}
+
+model RecipeTag {
+  id       String  @id
+  recipeId String  @map("recipe_id")
+  tag      String
+  recipe   Recipe  @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+
+  @@map("recipe_tags")
+}
+
+model Menu {
+  id          String    @id
+  familyId    String    @map("family_id")
+  dinnerDate  String    @map("dinner_date")
+  mealType    String    @default("DINNER") @map("meal_type")
+  status      String    @default("DRAFT")
+  notes       String?
+  publishedBy String?   @map("published_by")
+  publishedAt String?   @map("published_at")
+  completedAt String?   @map("completed_at")
+  createdAt   String    @map("created_at")
+  updatedAt   String    @map("updated_at")
+  family      Family    @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  publisher   Member?   @relation("PublishedMenus", fields: [publishedBy], references: [id], onDelete: SetNull)
+  items       MenuItem[]
+
+  @@unique([familyId, dinnerDate])
+  @@map("menus")
+}
+
+model MenuItem {
+  id               String               @id
+  menuId           String               @map("menu_id")
+  recipeId         String?              @map("recipe_id")
+  dishNameSnapshot String               @map("dish_name_snapshot")
+  servings         Int                  @default(3)
+  source           String
+  sortOrder        Int                  @default(0) @map("sort_order")
+  notes            String?
+  menu             Menu                 @relation(fields: [menuId], references: [id], onDelete: Cascade)
+  recipe           Recipe?              @relation(fields: [recipeId], references: [id], onDelete: SetNull)
+  ingredients      MenuItemIngredient[]
+  tags             MenuItemTag[]
+  feedbacks        DishFeedback[]
+
+  @@map("menu_items")
+}
+
+model MenuItemIngredient {
+  id             String   @id
+  menuItemId     String   @map("menu_item_id")
+  ingredientName String   @map("ingredient_name")
+  grams          Int      @default(0)
+  unit           String   @default("g")
+  menuItem       MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+
+  @@map("menu_item_ingredients")
+}
+
+model MenuItemTag {
+  id         String   @id
+  menuItemId String   @map("menu_item_id")
+  tag        String
+  menuItem   MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+
+  @@map("menu_item_tags")
+}
+
+model DishFeedback {
+  id         String   @id
+  menuItemId String   @map("menu_item_id")
+  memberId   String   @map("member_id")
+  likeScore  String   @map("like_score")
+  saltLevel  String   @map("salt_level")
+  portionFit String   @map("portion_fit")
+  comment    String?
+  createdAt  String   @map("created_at")
+  updatedAt  String   @map("updated_at")
+  menuItem   MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  member     Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([menuItemId, memberId])
+  @@map("dish_feedback")
+}

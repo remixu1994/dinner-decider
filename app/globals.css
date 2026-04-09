@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f8f2e8;
+  --surface: rgba(255, 252, 247, 0.92);
+  --foreground: #1f1a17;
+  --muted: #6b625b;
+  --ring: #e77b49;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Code", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  background-image:
+    radial-gradient(circle at top left, rgba(255, 184, 108, 0.28), transparent 28%),
+    radial-gradient(circle at bottom right, rgba(129, 190, 148, 0.2), transparent 26%);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button,
+input:focus,
+select:focus,
+textarea:focus {
+  outline-color: var(--ring);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: rgba(231, 123, 73, 0.2);
+}
+
+.app-shell {
+  min-height: 100vh;
+  padding: 1rem;
+}
+
+@media (min-width: 640px) {
+  .app-shell {
+    padding: 1.5rem;
+  }
+}
