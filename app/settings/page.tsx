@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { approveMemberAction } from "@/app/actions";
+import { InlineActionButtonForm } from "@/components/action-forms";
 import { SectionCard, TagChip } from "@/components/ui";
 import { JOIN_POLICY_LABELS, MEMBER_ROLE_LABELS } from "@/lib/constants";
 import { getSettingsData } from "@/lib/data";
@@ -29,7 +30,14 @@ export default async function SettingsPage() {
             </h1>
             <div className="mt-3 flex flex-wrap gap-2">
               <TagChip label={`家庭码 ${settings.family.code}`} tone="accent" />
-              <TagChip label={JOIN_POLICY_LABELS[settings.family.joinPolicy as "OPEN" | "APPROVAL"]} tone="soft" />
+              <TagChip
+                label={
+                  JOIN_POLICY_LABELS[
+                    settings.family.joinPolicy as "OPEN" | "APPROVAL"
+                  ]
+                }
+                tone="soft"
+              />
             </div>
           </div>
           <div className="flex gap-2">
@@ -76,10 +84,7 @@ export default async function SettingsPage() {
           </div>
         </SectionCard>
 
-        <SectionCard
-          title="待审核成员"
-          description="只有厨师或家庭创建者可以通过审核。"
-        >
+        <SectionCard title="待审核成员" description="只有厨师或家庭创建者可以通过审核。">
           {settings.pendingMembers.length === 0 ? (
             <p className="text-sm text-stone-500">当前没有待审核成员。</p>
           ) : (
@@ -96,12 +101,15 @@ export default async function SettingsPage() {
                     </p>
                   </div>
                   {canApprove ? (
-                    <form action={approveMemberAction}>
+                    <InlineActionButtonForm
+                      action={approveMemberAction}
+                      label="通过加入"
+                      pendingLabel="处理中..."
+                      buttonClassName="rounded-2xl bg-stone-950 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
+                      messageClassName="mt-2 text-xs"
+                    >
                       <input type="hidden" name="memberId" value={member.id} />
-                      <button className="rounded-2xl bg-stone-950 px-4 py-3 text-sm font-semibold text-white">
-                        通过加入
-                      </button>
-                    </form>
+                    </InlineActionButtonForm>
                   ) : (
                     <TagChip label="你暂无审核权限" tone="soft" />
                   )}

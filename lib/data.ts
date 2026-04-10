@@ -15,13 +15,17 @@ import {
   PRESET_TAGS,
 } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
-import { clearSession, getSession } from "@/lib/session";
-
-type ActiveRole = "CHEF" | "DINER";
+import {
+  type ActiveMode,
+  clearSession,
+  getSession,
+  setSession,
+} from "@/lib/session";
 
 type SessionContext = {
   family: Family;
   member: Member;
+  activeMode: ActiveMode;
 };
 
 type RecipeWithMeta = Prisma.RecipeGetPayload<{
@@ -60,6 +64,7 @@ type MenuItemView = {
   name: string;
   source: string;
   servings: number;
+  chefApproved: boolean;
   notes: string | null;
   tags: string[];
   ingredients: { name: string; grams: number; unit: string }[];
@@ -93,19 +98,30 @@ export type DashboardData = {
   currentMember: {
     id: string;
     nickname: string;
-    role: ActiveRole;
+    role: ActiveMode;
     isOwner: boolean;
     status: string;
     displayRole: "OWNER" | "CHEF" | "DINER" | "PENDING_MEMBER";
   };
+  activeMode: ActiveMode;
   workflowStatus: "COLLECTING" | "PLANNING" | "PUBLISHED" | "FEEDBACK" | "COMPLETED";
-  canManage: boolean;
+  canUseDinerMode: boolean;
+  canUseChefMode: boolean;
+  canEditRequests: boolean;
+  canEditMenu: boolean;
+  canApproveMembers: boolean;
   pendingCount: number;
   activeMembers: {
     id: string;
     nickname: string;
     role: string;
     isOwner: boolean;
+  }[];
+  pendingMembers: {
+    id: string;
+    nickname: string;
+    role: string;
+    createdAt: string;
   }[];
   todayRequestSummary: {
     id: string;
@@ -281,8 +297,20 @@ function getDisplayRole(member: Member) {
   return member.role === "CHEF" ? ("CHEF" as const) : ("DINER" as const);
 }
 
-function canManageMenu(member: Member) {
-  return member.status === "ACTIVE" && (member.isOwner || member.role === "CHEF");
+function getDefaultActiveMode(member: Pick<Member, "role" | "isOwner">): ActiveMode {
+  return member.isOwner || member.role === "CHEF" ? "CHEF" : "DINER";
+}
+
+function canEditRequests(context: SessionContext) {
+  return context.member.status === "ACTIVE" && context.activeMode === "DINER";
+}
+
+function canEditMenu(context: SessionContext) {
+  return context.member.status === "ACTIVE" && context.activeMode === "CHEF";
+}
+
+function canApproveMembers(context: SessionContext) {
+  return context.member.status === "ACTIVE" && context.activeMode === "CHEF";
 }
 
 async function getSessionContext(): Promise<SessionContext | null> {
@@ -302,7 +330,11 @@ async function getSessionContext(): Promise<SessionContext | null> {
     return null;
   }
 
-  return { family, member };
+  return {
+    family,
+    member,
+    activeMode: session.activeMode,
+  };
 }
 
 async function requireSessionContext() {
@@ -360,6 +392,7 @@ function mapMenu(menu: MenuWithMeta | null): MenuView | null {
       name: item.dishNameSnapshot,
       source: item.source,
       servings: item.servings,
+      chefApproved: item.chefApproved,
       notes: item.notes,
       tags: item.tags.map((tag) => tag.tag),
       ingredients: item.ingredients.map((ingredient) => ({
@@ -445,6 +478,10 @@ function deriveWorkflowStatus(
   }
 
   return "PLANNING" as const;
+}
+
+function isMenuLockedStatus(status: string | null | undefined) {
+  return status === "PUBLISHED" || status === "COMPLETED";
 }
 
 function scoreRecipe(
@@ -645,6 +682,7 @@ async function replaceMenuItemsFromRecipes(
         recipeId: recipe.id,
         dishNameSnapshot: recipe.name,
         servings: recipe.defaultServings,
+        chefApproved: false,
         source: "RECOMMENDED",
         sortOrder: index,
         tags: {
@@ -746,7 +784,7 @@ export async function createFamilyActionData(formData: FormData) {
     await seedDefaultRecipes(tx, familyId);
   });
 
-  return { familyId, memberId };
+  return { familyId, memberId, activeMode: "CHEF" as const };
 }
 
 export async function joinFamilyActionData(formData: FormData) {
@@ -772,7 +810,11 @@ export async function joinFamilyActionData(formData: FormData) {
   });
 
   if (existing) {
-    return { familyId: family.id, memberId: existing.id };
+    return {
+      familyId: family.id,
+      memberId: existing.id,
+      activeMode: getDefaultActiveMode(existing),
+    };
   }
 
   const created = await prisma.member.create({
@@ -787,7 +829,11 @@ export async function joinFamilyActionData(formData: FormData) {
     },
   });
 
-  return { familyId: family.id, memberId: created.id };
+  return {
+    familyId: family.id,
+    memberId: created.id,
+    activeMode: getDefaultActiveMode(created),
+  };
 }
 
 export async function getDashboardData(): Promise<DashboardData | null> {
@@ -820,6 +866,7 @@ export async function getDashboardData(): Promise<DashboardData | null> {
   ]);
 
   const activeMembers = familyMembers.filter((member) => member.status === "ACTIVE");
+  const pendingMembers = familyMembers.filter((member) => member.status === "PENDING");
   const requestSummary = todayRequests.map((request) => {
     const author = familyMembers.find((member) => member.id === request.memberId);
 
@@ -869,23 +916,34 @@ export async function getDashboardData(): Promise<DashboardData | null> {
     currentMember: {
       id: context.member.id,
       nickname: context.member.nickname,
-      role: context.member.role as ActiveRole,
+      role: context.member.role as ActiveMode,
       isOwner: context.member.isOwner,
       status: context.member.status,
       displayRole: getDisplayRole(context.member),
     },
+    activeMode: context.activeMode,
     workflowStatus: deriveWorkflowStatus(
       todayMenu,
       requestSummary.length,
       activeMembers.map((member) => member.id),
     ),
-    canManage: canManageMenu(context.member),
-    pendingCount: familyMembers.filter((member) => member.status === "PENDING").length,
+    canUseDinerMode: true,
+    canUseChefMode: true,
+    canEditRequests: canEditRequests(context),
+    canEditMenu: canEditMenu(context),
+    canApproveMembers: canApproveMembers(context),
+    pendingCount: pendingMembers.length,
     activeMembers: activeMembers.map((member) => ({
       id: member.id,
       nickname: member.nickname,
       role: member.role,
       isOwner: member.isOwner,
+    })),
+    pendingMembers: pendingMembers.map((member) => ({
+      id: member.id,
+      nickname: member.nickname,
+      role: member.role,
+      createdAt: member.createdAt,
     })),
     todayRequestSummary: requestSummary,
     myRequest,
@@ -896,29 +954,62 @@ export async function getDashboardData(): Promise<DashboardData | null> {
   };
 }
 
-export async function saveDinnerRequest(formData: FormData) {
-  const { family, member } = await requireSessionContext();
+export async function saveDinnerRequest(formData: FormData): Promise<boolean> {
+  const context = await requireSessionContext();
+  const { family, member } = context;
 
-  if (member.status !== "ACTIVE") {
-    return;
+  if (!canEditRequests(context)) {
+    return false;
   }
 
   const timestamp = nowIso();
+  const dinnerDate = todayKey();
+  const todayMenu = await prisma.menu.findUnique({
+    where: {
+      familyId_dinnerDate: {
+        familyId: family.id,
+        dinnerDate,
+      },
+    },
+    select: {
+      status: true,
+    },
+  });
+
+  if (isMenuLockedStatus(todayMenu?.status)) {
+    return false;
+  }
+
+  const existing = await prisma.dinnerRequest.findUnique({
+    where: {
+      familyId_memberId_dinnerDate: {
+        familyId: family.id,
+        memberId: member.id,
+        dinnerDate,
+      },
+    },
+  });
+  const desiredDishes = [
+    ...new Set([
+      ...parseStoredArray(existing?.desiredDishes),
+      ...normalizeList([String(formData.get("desiredDishes") ?? "")]),
+    ]),
+  ];
 
   await prisma.dinnerRequest.upsert({
     where: {
       familyId_memberId_dinnerDate: {
         familyId: family.id,
         memberId: member.id,
-        dinnerDate: todayKey(),
+        dinnerDate,
       },
     },
     create: {
       id: randomUUID(),
       familyId: family.id,
       memberId: member.id,
-      dinnerDate: todayKey(),
-      desiredDishes: JSON.stringify(normalizeList([String(formData.get("desiredDishes") ?? "")])),
+      dinnerDate,
+      desiredDishes: JSON.stringify(desiredDishes),
       dislikes: JSON.stringify(normalizeList([String(formData.get("dislikes") ?? "")])),
       flavorPreference: String(formData.get("flavorPreference") ?? "正常就好"),
       portionPreference: String(formData.get("portionPreference") ?? "刚刚好"),
@@ -933,7 +1024,7 @@ export async function saveDinnerRequest(formData: FormData) {
       updatedAt: timestamp,
     },
     update: {
-      desiredDishes: JSON.stringify(normalizeList([String(formData.get("desiredDishes") ?? "")])),
+      desiredDishes: JSON.stringify(desiredDishes),
       dislikes: JSON.stringify(normalizeList([String(formData.get("dislikes") ?? "")])),
       flavorPreference: String(formData.get("flavorPreference") ?? "正常就好"),
       portionPreference: String(formData.get("portionPreference") ?? "刚刚好"),
@@ -947,23 +1038,32 @@ export async function saveDinnerRequest(formData: FormData) {
       updatedAt: timestamp,
     },
   });
+
+  return true;
 }
 
-export async function adoptRecommendation(recipeIdsValue: string) {
-  const { family, member } = await requireSessionContext();
+export async function adoptRecommendation(recipeIdsValue: string): Promise<boolean> {
+  const context = await requireSessionContext();
+  const { family } = context;
 
-  if (!canManageMenu(member)) {
-    return;
+  if (!canEditMenu(context)) {
+    return false;
   }
 
   const selectedIds = normalizeList([recipeIdsValue]);
 
   if (selectedIds.length === 0) {
-    return;
+    return false;
   }
 
+  let adopted = false;
   await prisma.$transaction(async (tx) => {
     const menu = await getOrCreateDraftMenu(tx, family.id, todayKey());
+
+    if (isMenuLockedStatus(menu.status)) {
+      return;
+    }
+
     const recipes = (
       await tx.recipe.findMany({
         where: {
@@ -989,16 +1089,22 @@ export async function adoptRecommendation(recipeIdsValue: string) {
         updatedAt: nowIso(),
       },
     });
+
+    adopted = true;
   });
+
+  return adopted;
 }
 
-export async function addRecipeToCurrentMenu(recipeId: string) {
-  const { family, member } = await requireSessionContext();
+export async function addRecipeToCurrentMenu(recipeId: string): Promise<boolean> {
+  const context = await requireSessionContext();
+  const { family } = context;
 
-  if (!canManageMenu(member) || !recipeId) {
-    return;
+  if (!canEditMenu(context) || !recipeId) {
+    return false;
   }
 
+  let added = false;
   await prisma.$transaction(async (tx) => {
     const [menu, recipe] = await Promise.all([
       getOrCreateDraftMenu(tx, family.id, todayKey()),
@@ -1010,6 +1116,10 @@ export async function addRecipeToCurrentMenu(recipeId: string) {
         },
       }),
     ]);
+
+    if (isMenuLockedStatus(menu.status)) {
+      return;
+    }
 
     if (!recipe || recipe.familyId !== family.id) {
       return;
@@ -1024,6 +1134,7 @@ export async function addRecipeToCurrentMenu(recipeId: string) {
         recipeId: recipe.id,
         dishNameSnapshot: recipe.name,
         servings: recipe.defaultServings,
+        chefApproved: false,
         source: "LIBRARY",
         sortOrder,
         tags: {
@@ -1050,20 +1161,25 @@ export async function addRecipeToCurrentMenu(recipeId: string) {
         updatedAt: nowIso(),
       },
     });
+
+    added = true;
   });
+
+  return added;
 }
 
-export async function addManualDish(formData: FormData) {
-  const { family, member } = await requireSessionContext();
+export async function addManualDish(formData: FormData): Promise<boolean> {
+  const context = await requireSessionContext();
+  const { family } = context;
 
-  if (!canManageMenu(member)) {
-    return;
+  if (!canEditMenu(context)) {
+    return false;
   }
 
   const dishName = String(formData.get("dishName") ?? "").trim();
 
   if (!dishName) {
-    return;
+    return false;
   }
 
   const servings = Math.max(
@@ -1077,8 +1193,14 @@ export async function addManualDish(formData: FormData) {
   ]);
   const ingredients = parseIngredientLines(String(formData.get("ingredientsText") ?? ""));
 
+  let added = false;
   await prisma.$transaction(async (tx) => {
     const menu = await getOrCreateDraftMenu(tx, family.id, todayKey());
+
+    if (isMenuLockedStatus(menu.status)) {
+      return;
+    }
+
     const sortOrder = await tx.menuItem.count({ where: { menuId: menu.id } });
 
     await tx.menuItem.create({
@@ -1087,6 +1209,7 @@ export async function addManualDish(formData: FormData) {
         menuId: menu.id,
         dishNameSnapshot: dishName,
         servings,
+        chefApproved: false,
         source: "CUSTOM",
         sortOrder,
         tags: {
@@ -1113,30 +1236,58 @@ export async function addManualDish(formData: FormData) {
         updatedAt: nowIso(),
       },
     });
+
+    added = true;
   });
+
+  return added;
 }
 
-export async function removeMenuDish(menuItemId: string) {
-  const { member } = await requireSessionContext();
+export async function removeMenuDish(menuItemId: string): Promise<boolean> {
+  const context = await requireSessionContext();
 
-  if (!canManageMenu(member) || !menuItemId) {
-    return;
+  if (!canEditMenu(context) || !menuItemId) {
+    return false;
+  }
+
+  const menuItem = await prisma.menuItem.findUnique({
+    where: { id: menuItemId },
+    include: {
+      menu: true,
+    },
+  });
+
+  if (
+    !menuItem ||
+    menuItem.menu.familyId !== context.family.id ||
+    isMenuLockedStatus(menuItem.menu.status)
+  ) {
+    return false;
   }
 
   await prisma.menuItem.delete({
     where: { id: menuItemId },
   });
+
+  return true;
 }
 
-export async function publishCurrentMenu() {
-  const { family, member } = await requireSessionContext();
+export async function publishCurrentMenu(): Promise<boolean> {
+  const context = await requireSessionContext();
+  const { family, member } = context;
 
-  if (!canManageMenu(member)) {
-    return;
+  if (!canEditMenu(context)) {
+    return false;
   }
 
+  let published = false;
   await prisma.$transaction(async (tx) => {
     const menu = await getOrCreateDraftMenu(tx, family.id, todayKey());
+
+    if (isMenuLockedStatus(menu.status)) {
+      return;
+    }
+
     const items = await tx.menuItem.findMany({ where: { menuId: menu.id } });
 
     if (items.length === 0) {
@@ -1164,14 +1315,18 @@ export async function publishCurrentMenu() {
         },
       });
     }
+
+    published = true;
   });
+
+  return published;
 }
 
-export async function submitDishFeedback(formData: FormData) {
+export async function submitDishFeedback(formData: FormData): Promise<boolean> {
   const { family, member } = await requireSessionContext();
 
   if (member.status !== "ACTIVE") {
-    return;
+    return false;
   }
 
   const menuItemId = String(formData.get("menuItemId") ?? "");
@@ -1186,7 +1341,7 @@ export async function submitDishFeedback(formData: FormData) {
     !FEEDBACK_SALT_OPTIONS.includes(saltLevel as (typeof FEEDBACK_SALT_OPTIONS)[number]) ||
     !FEEDBACK_PORTION_OPTIONS.includes(portionFit as (typeof FEEDBACK_PORTION_OPTIONS)[number])
   ) {
-    return;
+    return false;
   }
 
   const menuItem = await prisma.menuItem.findUnique({
@@ -1197,7 +1352,7 @@ export async function submitDishFeedback(formData: FormData) {
   });
 
   if (!menuItem || menuItem.menu.familyId !== family.id) {
-    return;
+    return false;
   }
 
   const timestamp = nowIso();
@@ -1240,6 +1395,55 @@ export async function submitDishFeedback(formData: FormData) {
   ).map((activeMember) => activeMember.id);
 
   await markMenuCompletedIfReady(menuItem.menuId, activeMemberIds);
+
+  return true;
+}
+
+export async function toggleMenuItemChefApproval(menuItemId: string): Promise<boolean> {
+  const context = await requireSessionContext();
+
+  if (!canEditMenu(context) || !menuItemId) {
+    return false;
+  }
+
+  const menuItem = await prisma.menuItem.findUnique({
+    where: { id: menuItemId },
+    include: {
+      menu: true,
+    },
+  });
+
+  if (
+    !menuItem ||
+    menuItem.menu.familyId !== context.family.id ||
+    isMenuLockedStatus(menuItem.menu.status)
+  ) {
+    return false;
+  }
+
+  await prisma.menuItem.update({
+    where: { id: menuItemId },
+    data: {
+      chefApproved: !menuItem.chefApproved,
+    },
+  });
+
+  return true;
+}
+
+export async function switchActiveMode(mode: ActiveMode): Promise<boolean> {
+  const session = await getSession();
+
+  if (!session) {
+    return false;
+  }
+
+  await setSession({
+    ...session,
+    activeMode: mode,
+  });
+
+  return true;
 }
 
 export async function getHistoryData(activeTag?: string | null): Promise<HistoryData | null> {
@@ -1305,7 +1509,7 @@ export async function getHistoryData(activeTag?: string | null): Promise<History
     currentMember: {
       id: context.member.id,
       nickname: context.member.nickname,
-      role: context.member.role as ActiveRole,
+      role: context.member.role as ActiveMode,
       isOwner: context.member.isOwner,
       status: context.member.status,
       displayRole: getDisplayRole(context.member),
@@ -1343,7 +1547,7 @@ export async function getSettingsData(): Promise<SettingsData | null> {
     currentMember: {
       id: context.member.id,
       nickname: context.member.nickname,
-      role: context.member.role as ActiveRole,
+      role: context.member.role as ActiveMode,
       isOwner: context.member.isOwner,
       status: context.member.status,
       displayRole: getDisplayRole(context.member),
@@ -1366,11 +1570,15 @@ export async function getSettingsData(): Promise<SettingsData | null> {
   };
 }
 
-export async function approvePendingMember(memberId: string) {
-  const { family, member } = await requireSessionContext();
+export async function approvePendingMember(memberId: string): Promise<boolean> {
+  const context = await requireSessionContext();
+  const { family } = context;
+  const canApproveFromSettings =
+    context.member.status === "ACTIVE" &&
+    (context.member.isOwner || context.member.role === "CHEF");
 
-  if (!canManageMenu(member) || !memberId) {
-    return;
+  if ((!canApproveMembers(context) && !canApproveFromSettings) || !memberId) {
+    return false;
   }
 
   await prisma.member.updateMany({
@@ -1382,6 +1590,8 @@ export async function approvePendingMember(memberId: string) {
       status: "ACTIVE",
     },
   });
+
+  return true;
 }
 
 export async function leaveCurrentFamilySession() {

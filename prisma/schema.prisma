@@ -122,6 +122,7 @@ model MenuItem {
   recipeId         String?              @map("recipe_id")
   dishNameSnapshot String               @map("dish_name_snapshot")
   servings         Int                  @default(3)
+  chefApproved     Boolean              @default(false) @map("chef_approved")
   source           String
   sortOrder        Int                  @default(0) @map("sort_order")
   notes            String?
