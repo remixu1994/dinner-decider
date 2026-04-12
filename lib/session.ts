@@ -2,16 +2,38 @@ import { cookies } from "next/headers";
 
 const SESSION_COOKIE = "dinner-decider-session";
 
-export type ActiveMode = "CHEF" | "DINER";
-
 export type SessionData = {
-  familyId: string;
-  memberId: string;
-  activeMode: ActiveMode;
+  userId: string;
+  familyId?: string | null;
+  memberId?: string | null;
 };
 
-function normalizeActiveMode(raw: string | undefined): ActiveMode {
-  return raw === "CHEF" ? "CHEF" : "DINER";
+function normalizeSessionData(value: SessionData) {
+  const familyId = value.familyId?.trim() || null;
+  const memberId = value.memberId?.trim() || null;
+
+  return {
+    userId: value.userId.trim(),
+    familyId: familyId && memberId ? familyId : null,
+    memberId: familyId && memberId ? memberId : null,
+  } satisfies SessionData;
+}
+
+function isSessionData(value: unknown): value is SessionData {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const userId = candidate.userId;
+  const familyId = candidate.familyId;
+  const memberId = candidate.memberId;
+
+  return (
+    typeof userId === "string" &&
+    (familyId === undefined || familyId === null || typeof familyId === "string") &&
+    (memberId === undefined || memberId === null || typeof memberId === "string")
+  );
 }
 
 export async function getSession() {
@@ -22,31 +44,38 @@ export async function getSession() {
     return null;
   }
 
-  const [familyId, memberId, activeMode] = raw.split(":");
+  try {
+    const parsed = JSON.parse(raw);
 
-  if (!familyId || !memberId) {
+    if (!isSessionData(parsed) || !parsed.userId.trim()) {
+      return null;
+    }
+
+    return normalizeSessionData(parsed);
+  } catch {
     return null;
   }
-
-  return {
-    familyId,
-    memberId,
-    activeMode: normalizeActiveMode(activeMode),
-  } satisfies SessionData;
 }
 
 export async function setSession(session: SessionData) {
   const cookieStore = await cookies();
-  cookieStore.set(
-    SESSION_COOKIE,
-    `${session.familyId}:${session.memberId}:${normalizeActiveMode(session.activeMode)}`,
-    {
+  cookieStore.set(SESSION_COOKIE, JSON.stringify(normalizeSessionData(session)), {
     httpOnly: true,
     sameSite: "lax",
     path: "/",
     maxAge: 60 * 60 * 24 * 14,
-    },
-  );
+  });
+}
+
+export async function clearCurrentFamilySession() {
+  const session = await getSession();
+
+  if (!session?.userId) {
+    await clearSession();
+    return;
+  }
+
+  await setSession({ userId: session.userId });
 }
 
 export async function clearSession() {

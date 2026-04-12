@@ -1,10 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type {
-  Family,
-  Member,
-  Prisma,
-} from "@prisma/client";
+import type { Family, Member, Prisma, User } from "@prisma/client";
 
 import {
   APP_TIME_ZONE,
@@ -16,16 +12,31 @@ import {
 } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import {
-  type ActiveMode,
+  clearCurrentFamilySession,
   clearSession,
   getSession,
-  setSession,
+  type SessionData,
 } from "@/lib/session";
 
-type SessionContext = {
+type MemberRole = "CHEF" | "DINER";
+type HomeView = "CHEF" | "FAMILY";
+type HomePath = "/chef" | "/family";
+type WorkflowStatus =
+  | "COLLECTING"
+  | "PLANNING"
+  | "PRESET"
+  | "PUBLISHED"
+  | "FEEDBACK"
+  | "COMPLETED";
+
+type UserSessionContext = {
+  user: User;
+  session: SessionData;
+};
+
+type SessionContext = UserSessionContext & {
   family: Family;
   member: Member;
-  activeMode: ActiveMode;
 };
 
 type RecipeWithMeta = Prisma.RecipeGetPayload<{
@@ -87,7 +98,49 @@ type MenuView = {
   items: MenuItemView[];
 };
 
-export type DashboardData = {
+export type CurrentMemberView = {
+  id: string;
+  nickname: string;
+  role: MemberRole;
+  isOwner: boolean;
+  status: string;
+  displayRole: "OWNER" | "CHEF" | "DINER" | "PENDING_MEMBER";
+  canManageMenu: boolean;
+  canApproveMembers: boolean;
+  homePath: HomePath;
+  activeView: HomeView;
+  preferredHomeView: HomeView;
+  availableViews: HomeView[];
+};
+
+export type RequestSummary = {
+  id: string;
+  memberId: string;
+  nickname: string;
+  desiredDishes: string[];
+  dislikes: string[];
+  flavorPreference: string;
+  portionPreference: string;
+  tagPreferences: string[];
+  needsRecommendation: boolean;
+  note: string | null;
+  isFlexible: boolean;
+};
+
+type RecommendationView = {
+  id: string;
+  title: string;
+  reason: string;
+  recipes: RecipeView[];
+};
+
+type RecentMenuView = {
+  id: string;
+  dinnerDate: string;
+  items: { name: string; tags: string[] }[];
+};
+
+type FamilySnapshot = {
   family: {
     id: string;
     name: string;
@@ -95,21 +148,8 @@ export type DashboardData = {
     joinPolicy: string;
     defaultServings: number;
   };
-  currentMember: {
-    id: string;
-    nickname: string;
-    role: ActiveMode;
-    isOwner: boolean;
-    status: string;
-    displayRole: "OWNER" | "CHEF" | "DINER" | "PENDING_MEMBER";
-  };
-  activeMode: ActiveMode;
-  workflowStatus: "COLLECTING" | "PLANNING" | "PUBLISHED" | "FEEDBACK" | "COMPLETED";
-  canUseDinerMode: boolean;
-  canUseChefMode: boolean;
-  canEditRequests: boolean;
-  canEditMenu: boolean;
-  canApproveMembers: boolean;
+  currentMember: CurrentMemberView;
+  workflowStatus: WorkflowStatus;
   pendingCount: number;
   activeMembers: {
     id: string;
@@ -123,45 +163,28 @@ export type DashboardData = {
     role: string;
     createdAt: string;
   }[];
-  todayRequestSummary: {
-    id: string;
-    memberId: string;
-    nickname: string;
-    desiredDishes: string[];
-    dislikes: string[];
-    flavorPreference: string;
-    portionPreference: string;
-    tagPreferences: string[];
-    needsRecommendation: boolean;
-  }[];
-  myRequest:
-      | {
-        desiredDishes: string[];
-        dislikes: string[];
-        flavorPreference: string;
-        portionPreference: string;
-        tagPreferences: string[];
-        needsRecommendation: boolean;
-      }
-    | null;
+  todayRequestSummary: RequestSummary[];
+  myRequest: RequestSummary | null;
   currentMenu: MenuView | null;
   quickRecipes: RecipeView[];
-  recommendations: {
-    id: string;
-    title: string;
-    reason: string;
-    recipes: RecipeView[];
-  }[];
-  recentMenus: {
-    id: string;
-    dinnerDate: string;
-    items: { name: string; tags: string[] }[];
-  }[];
+  recommendations: RecommendationView[];
+  recentMenus: RecentMenuView[];
 };
+
+export type DinerHomeData = FamilySnapshot & {
+  quickStart: {
+    suggestedDishes: string[];
+    recentChoices: string[];
+    recommendedDishes: string[];
+    tagChoices: string[];
+  };
+};
+
+export type ChefWorkspaceData = FamilySnapshot;
 
 export type HistoryData = {
   family: { name: string; code: string };
-  currentMember: DashboardData["currentMember"];
+  currentMember: CurrentMemberView;
   allTags: string[];
   activeTag: string | null;
   menus: {
@@ -183,8 +206,9 @@ export type HistoryData = {
 };
 
 export type SettingsData = {
+  user: { code: string };
   family: { name: string; code: string; joinPolicy: string };
-  currentMember: DashboardData["currentMember"];
+  currentMember: CurrentMemberView;
   members: {
     id: string;
     nickname: string;
@@ -200,9 +224,33 @@ export type SettingsData = {
   }[];
 };
 
+export type FamiliesHubData = {
+  user: { code: string };
+  currentFamilyId: string | null;
+  families: {
+    memberId: string;
+    familyId: string;
+    familyName: string;
+    familyCode: string;
+    joinPolicy: string;
+    nickname: string;
+    role: string;
+    isOwner: boolean;
+    status: string;
+    homePath: "/family" | "/chef";
+  }[];
+};
+
+type SessionLaunch = {
+  session: SessionData;
+  landingPath: "/families" | "/family" | "/chef";
+};
+
 function nowIso() {
   return new Date().toISOString();
 }
+
+const USER_CODE_PATTERN = /^[A-Z0-9]{6,12}$/;
 
 export function todayKey() {
   return new Intl.DateTimeFormat("en-CA", {
@@ -216,6 +264,20 @@ export function todayKey() {
 export function formatDinnerDate(dinnerDate: string) {
   const [year, month, day] = dinnerDate.split("-");
   return `${year}年${Number(month)}月${Number(day)}日`;
+}
+
+function normalizeUserCode(value: string) {
+  return value.trim().toUpperCase();
+}
+
+function parseUserCodeInput(formData: FormData) {
+  return normalizeUserCode(String(formData.get("userCode") ?? ""));
+}
+
+function ensureValidUserCode(userCode: string) {
+  if (!USER_CODE_PATTERN.test(userCode)) {
+    throw new Error("USER_CODE_INVALID");
+  }
 }
 
 function parseStoredArray(value: string | null | undefined) {
@@ -297,43 +359,83 @@ function getDisplayRole(member: Member) {
   return member.role === "CHEF" ? ("CHEF" as const) : ("DINER" as const);
 }
 
-function getDefaultActiveMode(member: Pick<Member, "role" | "isOwner">): ActiveMode {
-  return member.isOwner || member.role === "CHEF" ? "CHEF" : "DINER";
+function canManageMenuForMember(member: Pick<Member, "status" | "role" | "isOwner">) {
+  return member.status === "ACTIVE" && (member.isOwner || member.role === "CHEF");
+}
+
+function getPreferredHomeView(member: Pick<Member, "status" | "role" | "isOwner" | "preferredHomeView">): HomeView {
+  if (!canManageMenuForMember(member)) {
+    return "FAMILY";
+  }
+
+  return member.preferredHomeView === "FAMILY" ? "FAMILY" : "CHEF";
+}
+
+function getHomePathForMember(
+  member: Pick<Member, "status" | "role" | "isOwner" | "preferredHomeView">,
+): HomePath {
+  return getPreferredHomeView(member) === "FAMILY" ? "/family" : "/chef";
 }
 
 function canEditRequests(context: SessionContext) {
-  return context.member.status === "ACTIVE" && context.activeMode === "DINER";
+  return context.member.status === "ACTIVE";
 }
 
 function canEditMenu(context: SessionContext) {
-  return context.member.status === "ACTIVE" && context.activeMode === "CHEF";
+  return canManageMenuForMember(context.member);
 }
 
 function canApproveMembers(context: SessionContext) {
-  return context.member.status === "ACTIVE" && context.activeMode === "CHEF";
+  return canManageMenuForMember(context.member);
+}
+
+function mapCurrentMember(member: Member, activeView: HomeView): CurrentMemberView {
+  const canManageMenu = canManageMenuForMember(member);
+  const preferredHomeView = getPreferredHomeView(member);
+
+  return {
+    id: member.id,
+    nickname: member.nickname,
+    role: member.role === "CHEF" ? "CHEF" : "DINER",
+    isOwner: member.isOwner,
+    status: member.status,
+    displayRole: getDisplayRole(member),
+    canManageMenu,
+    canApproveMembers: canManageMenu,
+    homePath: getHomePathForMember(member),
+    activeView,
+    preferredHomeView,
+    availableViews: canManageMenu ? ["CHEF", "FAMILY"] : ["FAMILY"],
+  };
 }
 
 async function getSessionContext(): Promise<SessionContext | null> {
-  const session = await getSession();
+  const userContext = await getUserSessionContext();
 
-  if (!session) {
+  if (!userContext?.session.familyId || !userContext.session.memberId) {
     return null;
   }
 
   const [family, member] = await Promise.all([
-    prisma.family.findUnique({ where: { id: session.familyId } }),
-    prisma.member.findUnique({ where: { id: session.memberId } }),
+    prisma.family.findUnique({ where: { id: userContext.session.familyId } }),
+    prisma.member.findUnique({ where: { id: userContext.session.memberId } }),
   ]);
 
-  if (!family || !member || member.familyId !== family.id) {
-    await clearSession();
+  if (
+    !family ||
+    !member ||
+    member.familyId !== family.id ||
+    member.userId !== userContext.user.id
+  ) {
+    await clearCurrentFamilySession();
     return null;
   }
 
   return {
+    user: userContext.user,
+    session: userContext.session,
     family,
     member,
-    activeMode: session.activeMode,
   };
 }
 
@@ -342,6 +444,38 @@ async function requireSessionContext() {
 
   if (!context) {
     throw new Error("SESSION_REQUIRED");
+  }
+
+  return context;
+}
+
+async function getUserSessionContext(): Promise<UserSessionContext | null> {
+  const session = await getSession();
+
+  if (!session?.userId) {
+    return null;
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: session.userId },
+  });
+
+  if (!user) {
+    await clearSession();
+    return null;
+  }
+
+  return {
+    user,
+    session,
+  };
+}
+
+async function requireUserSessionContext() {
+  const context = await getUserSessionContext();
+
+  if (!context) {
+    throw new Error("USER_SESSION_REQUIRED");
   }
 
   return context;
@@ -358,6 +492,39 @@ async function createFamilyCode() {
   }
 
   return randomUUID().slice(0, 6).toUpperCase();
+}
+
+async function resolveUserIdentityForCreateOrJoin(formData: FormData) {
+  const providedUserCode = parseUserCodeInput(formData);
+
+  if (providedUserCode) {
+    ensureValidUserCode(providedUserCode);
+    const existingUser = await prisma.user.findUnique({
+      where: { code: providedUserCode },
+    });
+
+    if (existingUser) {
+      return {
+        userId: existingUser.id,
+        userCode: existingUser.code,
+        shouldCreateUser: false,
+      };
+    }
+
+    return {
+      userId: randomUUID(),
+      userCode: providedUserCode,
+      shouldCreateUser: true,
+    };
+  }
+
+  const userContext = await requireUserSessionContext();
+
+  return {
+    userId: userContext.user.id,
+    userCode: userContext.user.code,
+    shouldCreateUser: false,
+  };
 }
 
 function mapRecipe(recipe: RecipeWithMeta): RecipeView {
@@ -386,32 +553,43 @@ function mapMenu(menu: MenuWithMeta | null): MenuView | null {
     status: menu.status,
     publishedAt: menu.publishedAt,
     completedAt: menu.completedAt,
-    items: menu.items.map((item) => ({
-      id: item.id,
-      recipeId: item.recipeId,
-      name: item.dishNameSnapshot,
-      source: item.source,
-      servings: item.servings,
-      chefApproved: item.chefApproved,
-      notes: item.notes,
-      tags: item.tags.map((tag) => tag.tag),
-      ingredients: item.ingredients.map((ingredient) => ({
-        name: ingredient.ingredientName,
-        grams: ingredient.grams,
-        unit: ingredient.unit,
-      })),
-      feedbackByMemberId: Object.fromEntries(
-        item.feedbacks.map((feedback) => [
-          feedback.memberId,
-          {
-            likeScore: feedback.likeScore,
-            saltLevel: feedback.saltLevel,
-            portionFit: feedback.portionFit,
-            comment: feedback.comment,
-          },
-        ]),
-      ),
-    })),
+    items: menu.items.map((rawItem) => {
+      const item = rawItem as typeof rawItem & {
+        recipeId: string | null;
+        dishNameSnapshot: string;
+        source: string;
+        servings: number;
+        chefApproved: boolean;
+        notes: string | null;
+      };
+
+      return {
+        id: item.id,
+        recipeId: item.recipeId,
+        name: item.dishNameSnapshot,
+        source: item.source,
+        servings: item.servings,
+        chefApproved: item.chefApproved,
+        notes: item.notes,
+        tags: item.tags.map((tag) => tag.tag),
+        ingredients: item.ingredients.map((ingredient) => ({
+          name: ingredient.ingredientName,
+          grams: ingredient.grams,
+          unit: ingredient.unit,
+        })),
+        feedbackByMemberId: Object.fromEntries(
+          item.feedbacks.map((feedback) => [
+            feedback.memberId,
+            {
+              likeScore: feedback.likeScore,
+              saltLevel: feedback.saltLevel,
+              portionFit: feedback.portionFit,
+              comment: feedback.comment,
+            },
+          ]),
+        ),
+      };
+    }),
   };
 }
 
@@ -455,9 +633,13 @@ function deriveWorkflowStatus(
   menu: MenuView | null,
   requestCount: number,
   activeMemberIds: string[],
-) {
+): WorkflowStatus {
   if (!menu || menu.items.length === 0) {
     return requestCount > 0 ? "PLANNING" : "COLLECTING";
+  }
+
+  if (menu.status === "PRESET") {
+    return "PRESET";
   }
 
   const totalExpectedFeedback = menu.items.length * activeMemberIds.length;
@@ -528,10 +710,12 @@ function scoreRecipe(
 
 function buildRecommendations(
   allRecipes: RecipeView[],
-  requestRows: DashboardData["todayRequestSummary"],
-  recentMenus: DashboardData["recentMenus"],
+  requestRows: RequestSummary[],
+  recentMenus: RecentMenuView[],
 ) {
-  const desired = requestRows.flatMap((request) => request.desiredDishes);
+  const desired = requestRows
+    .flatMap((request) => request.desiredDishes)
+    .filter((dish) => dish !== "都可以");
   const dislikes = requestRows.flatMap((request) => request.dislikes);
   const tags = [...new Set(requestRows.flatMap((request) => request.tagPreferences))];
   const recentlyCooked = recentMenus.flatMap((menu) => menu.items.map((item) => item.name));
@@ -578,14 +762,14 @@ function buildRecommendations(
     const desiredText = desired.slice(0, 2).join("、");
     const reason =
       desiredText.length > 0
-        ? `优先照顾今天提到的“${desiredText}”，同时避开最近频繁重复的组合。`
+        ? `优先照顾今天提到的“${desiredText}”，同时尽量避开最近重复率太高的搭配。`
         : tagText.length > 0
           ? `按今天偏好的 ${tagText} 方向组合，方便厨师直接开做。`
-          : "结合历史常做菜和省心搭配，尽量让今晚少纠结。";
+          : "结合历史高频菜和省心搭配，尽量让今晚少纠结。";
 
     return {
       id: `recommendation-${index + 1}`,
-      title: ["顺手开做", "照顾偏好", "换个口味"][index] ?? `推荐方案 ${index + 1}`,
+      title: ["省心开做", "照顾偏好", "换个口味"][index] ?? `推荐方案 ${index + 1}`,
       reason,
       recipes: recipesGroup,
     };
@@ -682,7 +866,6 @@ async function replaceMenuItemsFromRecipes(
         recipeId: recipe.id,
         dishNameSnapshot: recipe.name,
         servings: recipe.defaultServings,
-        chefApproved: false,
         source: "RECOMMENDED",
         sortOrder: index,
         tags: {
@@ -738,7 +921,7 @@ async function markMenuCompletedIfReady(menuId: string, activeMemberIds: string[
   }
 }
 
-export async function createFamilyActionData(formData: FormData) {
+export async function createFamilyActionData(formData: FormData): Promise<SessionLaunch> {
   const familyName = String(formData.get("familyName") ?? "").trim();
   const nickname = String(formData.get("nickname") ?? "").trim();
   const joinPolicy =
@@ -752,12 +935,23 @@ export async function createFamilyActionData(formData: FormData) {
     throw new Error("CREATE_FAMILY_INVALID");
   }
 
+  const userIdentity = await resolveUserIdentityForCreateOrJoin(formData);
   const familyId = randomUUID();
   const memberId = randomUUID();
   const code = await createFamilyCode();
   const timestamp = nowIso();
 
   await prisma.$transaction(async (tx) => {
+    if (userIdentity.shouldCreateUser) {
+      await tx.user.create({
+        data: {
+          id: userIdentity.userId,
+          code: userIdentity.userCode,
+          createdAt: timestamp,
+        },
+      });
+    }
+
     await tx.family.create({
       data: {
         id: familyId,
@@ -772,10 +966,12 @@ export async function createFamilyActionData(formData: FormData) {
     await tx.member.create({
       data: {
         id: memberId,
+        userId: userIdentity.userId,
         familyId,
         nickname,
         role: "CHEF",
         isOwner: true,
+        preferredHomeView: "CHEF",
         status: "ACTIVE",
         createdAt: timestamp,
       },
@@ -784,10 +980,13 @@ export async function createFamilyActionData(formData: FormData) {
     await seedDefaultRecipes(tx, familyId);
   });
 
-  return { familyId, memberId, activeMode: "CHEF" as const };
+  return {
+    session: { userId: userIdentity.userId, familyId, memberId },
+    landingPath: "/chef",
+  };
 }
 
-export async function joinFamilyActionData(formData: FormData) {
+export async function joinFamilyActionData(formData: FormData): Promise<SessionLaunch> {
   const familyCode = String(formData.get("familyCode") ?? "").trim().toUpperCase();
   const nickname = String(formData.get("nickname") ?? "").trim();
   const role = String(formData.get("role") ?? "DINER") === "CHEF" ? "CHEF" : "DINER";
@@ -796,6 +995,7 @@ export async function joinFamilyActionData(formData: FormData) {
     throw new Error("JOIN_FAMILY_INVALID");
   }
 
+  const userIdentity = await resolveUserIdentityForCreateOrJoin(formData);
   const family = await prisma.family.findUnique({ where: { code: familyCode } });
 
   if (!family) {
@@ -805,38 +1005,58 @@ export async function joinFamilyActionData(formData: FormData) {
   const existing = await prisma.member.findFirst({
     where: {
       familyId: family.id,
-      nickname,
+      userId: userIdentity.userId,
     },
   });
 
   if (existing) {
     return {
-      familyId: family.id,
-      memberId: existing.id,
-      activeMode: getDefaultActiveMode(existing),
+      session: {
+        userId: userIdentity.userId,
+        familyId: family.id,
+        memberId: existing.id,
+      },
+      landingPath: getHomePathForMember(existing),
     };
   }
 
-  const created = await prisma.member.create({
-    data: {
-      id: randomUUID(),
-      familyId: family.id,
-      nickname,
-      role,
-      isOwner: false,
-      status: family.joinPolicy === "APPROVAL" ? "PENDING" : "ACTIVE",
-      createdAt: nowIso(),
-    },
+  const created = await prisma.$transaction(async (tx) => {
+    if (userIdentity.shouldCreateUser) {
+      await tx.user.create({
+        data: {
+          id: userIdentity.userId,
+          code: userIdentity.userCode,
+          createdAt: nowIso(),
+        },
+      });
+    }
+
+    return tx.member.create({
+      data: {
+        id: randomUUID(),
+        userId: userIdentity.userId,
+        familyId: family.id,
+        nickname,
+        role,
+        isOwner: false,
+        preferredHomeView: role === "CHEF" ? "CHEF" : "FAMILY",
+        status: family.joinPolicy === "APPROVAL" ? "PENDING" : "ACTIVE",
+        createdAt: nowIso(),
+      },
+    });
   });
 
   return {
-    familyId: family.id,
-    memberId: created.id,
-    activeMode: getDefaultActiveMode(created),
+    session: {
+      userId: userIdentity.userId,
+      familyId: family.id,
+      memberId: created.id,
+    },
+    landingPath: getHomePathForMember(created),
   };
 }
 
-export async function getDashboardData(): Promise<DashboardData | null> {
+async function loadFamilySnapshot(activeView: HomeView): Promise<FamilySnapshot | null> {
   const context = await getSessionContext();
 
   if (!context) {
@@ -869,17 +1089,20 @@ export async function getDashboardData(): Promise<DashboardData | null> {
   const pendingMembers = familyMembers.filter((member) => member.status === "PENDING");
   const requestSummary = todayRequests.map((request) => {
     const author = familyMembers.find((member) => member.id === request.memberId);
+    const desiredDishes = parseStoredArray(request.desiredDishes);
 
     return {
       id: request.id,
       memberId: request.memberId,
       nickname: author?.nickname ?? "家庭成员",
-      desiredDishes: parseStoredArray(request.desiredDishes),
+      desiredDishes,
       dislikes: parseStoredArray(request.dislikes),
       flavorPreference: request.flavorPreference,
       portionPreference: request.portionPreference,
       tagPreferences: parseStoredArray(request.tagPreferences),
       needsRecommendation: request.needsRecommendation,
+      note: request.note,
+      isFlexible: desiredDishes.includes("都可以"),
     };
   });
   const myRequest = requestSummary.find((request) => request.memberId === context.member.id) ?? null;
@@ -913,25 +1136,12 @@ export async function getDashboardData(): Promise<DashboardData | null> {
       joinPolicy: context.family.joinPolicy,
       defaultServings: context.family.defaultServings,
     },
-    currentMember: {
-      id: context.member.id,
-      nickname: context.member.nickname,
-      role: context.member.role as ActiveMode,
-      isOwner: context.member.isOwner,
-      status: context.member.status,
-      displayRole: getDisplayRole(context.member),
-    },
-    activeMode: context.activeMode,
+    currentMember: mapCurrentMember(context.member, activeView),
     workflowStatus: deriveWorkflowStatus(
       todayMenu,
       requestSummary.length,
       activeMembers.map((member) => member.id),
     ),
-    canUseDinerMode: true,
-    canUseChefMode: true,
-    canEditRequests: canEditRequests(context),
-    canEditMenu: canEditMenu(context),
-    canApproveMembers: canApproveMembers(context),
     pendingCount: pendingMembers.length,
     activeMembers: activeMembers.map((member) => ({
       id: member.id,
@@ -951,6 +1161,155 @@ export async function getDashboardData(): Promise<DashboardData | null> {
     quickRecipes: recipeRows.slice(0, 6),
     recommendations: buildRecommendations(recipeRows, requestSummary, recentMenus),
     recentMenus,
+  };
+}
+
+export async function getDinerHomeData(): Promise<DinerHomeData | null> {
+  const snapshot = await loadFamilySnapshot("FAMILY");
+
+  if (!snapshot) {
+    return null;
+  }
+
+  const recommendedDishes = snapshot.recommendations
+    .flatMap((recommendation) => recommendation.recipes.map((recipe) => recipe.name))
+    .filter((dish, index, array) => array.indexOf(dish) === index)
+    .slice(0, 6);
+  const recentChoices = snapshot.recentMenus
+    .flatMap((menu) => menu.items.map((item) => item.name))
+    .filter((dish, index, array) => dish !== "都可以" && array.indexOf(dish) === index)
+    .slice(0, 6);
+  const suggestedDishes = snapshot.quickRecipes
+    .map((recipe) => recipe.name)
+    .filter((dish, index, array) => array.indexOf(dish) === index)
+    .slice(0, 6);
+
+  return {
+    ...snapshot,
+    quickStart: {
+      suggestedDishes,
+      recentChoices,
+      recommendedDishes,
+      tagChoices: [...PRESET_TAGS],
+    },
+  };
+}
+
+export async function getChefWorkspaceData(): Promise<ChefWorkspaceData | null> {
+  return loadFamilySnapshot("CHEF");
+}
+
+export async function getSessionLandingPath() {
+  const userContext = await getUserSessionContext();
+
+  if (!userContext) {
+    return null;
+  }
+
+  const context = await getSessionContext();
+
+  if (!context) {
+    return "/families" as const;
+  }
+
+  return getHomePathForMember(context.member);
+}
+
+export async function signInWithUserCodeActionData(formData: FormData): Promise<SessionLaunch> {
+  const userCode = parseUserCodeInput(formData);
+  ensureValidUserCode(userCode);
+
+  const user = await prisma.user.findUnique({
+    where: { code: userCode },
+  });
+
+  if (!user) {
+    throw new Error("USER_NOT_FOUND");
+  }
+
+  return {
+    session: { userId: user.id },
+    landingPath: "/families",
+  };
+}
+
+export async function selectFamilyActionData(formData: FormData): Promise<SessionLaunch> {
+  const memberId = String(formData.get("memberId") ?? "");
+  const userContext = await requireUserSessionContext();
+
+  if (!memberId) {
+    throw new Error("FAMILY_SELECTION_INVALID");
+  }
+
+  const member = await prisma.member.findUnique({
+    where: { id: memberId },
+  });
+
+  if (!member || member.userId !== userContext.user.id) {
+    throw new Error("FAMILY_SELECTION_INVALID");
+  }
+
+  return {
+    session: {
+      userId: userContext.user.id,
+      familyId: member.familyId,
+      memberId: member.id,
+    },
+    landingPath: getHomePathForMember(member),
+  };
+}
+
+export async function switchMemberHomeView(targetView: HomeView): Promise<HomePath | null> {
+  const context = await getSessionContext();
+
+  if (!context || !canEditMenu(context)) {
+    return null;
+  }
+
+  const preferredHomeView = targetView === "FAMILY" ? "FAMILY" : "CHEF";
+
+  await prisma.member.update({
+    where: { id: context.member.id },
+    data: {
+      preferredHomeView,
+    },
+  });
+
+  return preferredHomeView === "FAMILY" ? "/family" : "/chef";
+}
+
+export async function getFamiliesHubData(): Promise<FamiliesHubData | null> {
+  const userContext = await getUserSessionContext();
+
+  if (!userContext) {
+    return null;
+  }
+
+  const memberships = await prisma.member.findMany({
+    where: { userId: userContext.user.id },
+    include: {
+      family: true,
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  return {
+    user: {
+      code: userContext.user.code,
+    },
+    currentFamilyId: userContext.session.familyId ?? null,
+    families: memberships.map((membership) => ({
+      memberId: membership.id,
+      familyId: membership.familyId,
+      familyName: membership.family.name,
+      familyCode: membership.family.code,
+      joinPolicy: membership.family.joinPolicy,
+      nickname: membership.nickname,
+      role: membership.role,
+      isOwner: membership.isOwner,
+      status: membership.status,
+      homePath: getHomePathForMember(membership),
+    })),
   };
 }
 
@@ -980,21 +1339,30 @@ export async function saveDinnerRequest(formData: FormData): Promise<boolean> {
     return false;
   }
 
-  const existing = await prisma.dinnerRequest.findUnique({
-    where: {
-      familyId_memberId_dinnerDate: {
-        familyId: family.id,
-        memberId: member.id,
-        dinnerDate,
-      },
-    },
-  });
-  const desiredDishes = [
-    ...new Set([
-      ...parseStoredArray(existing?.desiredDishes),
-      ...normalizeList([String(formData.get("desiredDishes") ?? "")]),
-    ]),
-  ];
+  const isFlexible = formData.get("isFlexible") === "on";
+  const desiredDishes = normalizeList([
+    ...formData.getAll("desiredDishes"),
+    String(formData.get("customDesiredDish") ?? ""),
+  ]).filter((dish) => dish !== "都可以");
+  const finalDesiredDishes = isFlexible ? ["都可以", ...desiredDishes] : desiredDishes;
+  const dislikes = normalizeList([String(formData.get("dislikes") ?? "")]);
+  const tagPreferences = normalizeTags([
+    ...formData.getAll("tagPreferences"),
+    String(formData.get("customTagPreferences") ?? ""),
+  ]);
+  const note = String(formData.get("note") ?? "").trim() || null;
+  const needsRecommendation =
+    formData.get("needsRecommendation") === null || formData.get("needsRecommendation") === "on";
+
+  if (
+    finalDesiredDishes.length === 0 &&
+    dislikes.length === 0 &&
+    tagPreferences.length === 0 &&
+    !note &&
+    !needsRecommendation
+  ) {
+    return false;
+  }
 
   await prisma.dinnerRequest.upsert({
     where: {
@@ -1009,32 +1377,24 @@ export async function saveDinnerRequest(formData: FormData): Promise<boolean> {
       familyId: family.id,
       memberId: member.id,
       dinnerDate,
-      desiredDishes: JSON.stringify(desiredDishes),
-      dislikes: JSON.stringify(normalizeList([String(formData.get("dislikes") ?? "")])),
+      desiredDishes: JSON.stringify(finalDesiredDishes),
+      dislikes: JSON.stringify(dislikes),
+      note,
       flavorPreference: String(formData.get("flavorPreference") ?? "正常就好"),
       portionPreference: String(formData.get("portionPreference") ?? "刚刚好"),
-      tagPreferences: JSON.stringify(
-        normalizeTags([
-          ...formData.getAll("tagPreferences"),
-          String(formData.get("customTagPreferences") ?? ""),
-        ]),
-      ),
-      needsRecommendation: formData.get("needsRecommendation") === "on",
+      tagPreferences: JSON.stringify(tagPreferences),
+      needsRecommendation,
       createdAt: timestamp,
       updatedAt: timestamp,
     },
     update: {
-      desiredDishes: JSON.stringify(desiredDishes),
-      dislikes: JSON.stringify(normalizeList([String(formData.get("dislikes") ?? "")])),
+      desiredDishes: JSON.stringify(finalDesiredDishes),
+      dislikes: JSON.stringify(dislikes),
+      note,
       flavorPreference: String(formData.get("flavorPreference") ?? "正常就好"),
       portionPreference: String(formData.get("portionPreference") ?? "刚刚好"),
-      tagPreferences: JSON.stringify(
-        normalizeTags([
-          ...formData.getAll("tagPreferences"),
-          String(formData.get("customTagPreferences") ?? ""),
-        ]),
-      ),
-      needsRecommendation: formData.get("needsRecommendation") === "on",
+      tagPreferences: JSON.stringify(tagPreferences),
+      needsRecommendation,
       updatedAt: timestamp,
     },
   });
@@ -1134,7 +1494,6 @@ export async function addRecipeToCurrentMenu(recipeId: string): Promise<boolean>
         recipeId: recipe.id,
         dishNameSnapshot: recipe.name,
         servings: recipe.defaultServings,
-        chefApproved: false,
         source: "LIBRARY",
         sortOrder,
         tags: {
@@ -1209,7 +1568,6 @@ export async function addManualDish(formData: FormData): Promise<boolean> {
         menuId: menu.id,
         dishNameSnapshot: dishName,
         servings,
-        chefApproved: false,
         source: "CUSTOM",
         sortOrder,
         tags: {
@@ -1269,7 +1627,51 @@ export async function removeMenuDish(menuItemId: string): Promise<boolean> {
     where: { id: menuItemId },
   });
 
+  await prisma.menu.update({
+    where: { id: menuItem.menuId },
+    data: {
+      status: "DRAFT",
+      updatedAt: nowIso(),
+    },
+  });
+
   return true;
+}
+
+export async function savePresetMenu(): Promise<boolean> {
+  const context = await requireSessionContext();
+  const { family } = context;
+
+  if (!canEditMenu(context)) {
+    return false;
+  }
+
+  let saved = false;
+  await prisma.$transaction(async (tx) => {
+    const menu = await getOrCreateDraftMenu(tx, family.id, todayKey());
+
+    if (isMenuLockedStatus(menu.status)) {
+      return;
+    }
+
+    const items = await tx.menuItem.findMany({ where: { menuId: menu.id } });
+
+    if (items.length === 0) {
+      return;
+    }
+
+    await tx.menu.update({
+      where: { id: menu.id },
+      data: {
+        status: "PRESET",
+        updatedAt: nowIso(),
+      },
+    });
+
+    saved = true;
+  });
+
+  return saved;
 }
 
 export async function publishCurrentMenu(): Promise<boolean> {
@@ -1428,19 +1830,12 @@ export async function toggleMenuItemChefApproval(menuItemId: string): Promise<bo
     },
   });
 
-  return true;
-}
-
-export async function switchActiveMode(mode: ActiveMode): Promise<boolean> {
-  const session = await getSession();
-
-  if (!session) {
-    return false;
-  }
-
-  await setSession({
-    ...session,
-    activeMode: mode,
+  await prisma.menu.update({
+    where: { id: menuItem.menuId },
+    data: {
+      status: "DRAFT",
+      updatedAt: nowIso(),
+    },
   });
 
   return true;
@@ -1506,14 +1901,7 @@ export async function getHistoryData(activeTag?: string | null): Promise<History
       name: context.family.name,
       code: context.family.code,
     },
-    currentMember: {
-      id: context.member.id,
-      nickname: context.member.nickname,
-      role: context.member.role as ActiveMode,
-      isOwner: context.member.isOwner,
-      status: context.member.status,
-      displayRole: getDisplayRole(context.member),
-    },
+    currentMember: mapCurrentMember(context.member, getPreferredHomeView(context.member)),
     allTags: [
       ...new Set(
         menus.flatMap((menu) =>
@@ -1539,19 +1927,15 @@ export async function getSettingsData(): Promise<SettingsData | null> {
   });
 
   return {
+    user: {
+      code: context.user.code,
+    },
     family: {
       name: context.family.name,
       code: context.family.code,
       joinPolicy: context.family.joinPolicy,
     },
-    currentMember: {
-      id: context.member.id,
-      nickname: context.member.nickname,
-      role: context.member.role as ActiveMode,
-      isOwner: context.member.isOwner,
-      status: context.member.status,
-      displayRole: getDisplayRole(context.member),
-    },
+    currentMember: mapCurrentMember(context.member, getPreferredHomeView(context.member)),
     members: familyMembers.map((familyMember) => ({
       id: familyMember.id,
       nickname: familyMember.nickname,
@@ -1573,11 +1957,8 @@ export async function getSettingsData(): Promise<SettingsData | null> {
 export async function approvePendingMember(memberId: string): Promise<boolean> {
   const context = await requireSessionContext();
   const { family } = context;
-  const canApproveFromSettings =
-    context.member.status === "ACTIVE" &&
-    (context.member.isOwner || context.member.role === "CHEF");
 
-  if ((!canApproveMembers(context) && !canApproveFromSettings) || !memberId) {
+  if (!canApproveMembers(context) || !memberId) {
     return false;
   }
 
@@ -1595,6 +1976,10 @@ export async function approvePendingMember(memberId: string): Promise<boolean> {
 }
 
 export async function leaveCurrentFamilySession() {
+  await clearCurrentFamilySession();
+}
+
+export async function leaveUserSession() {
   await clearSession();
 }
 

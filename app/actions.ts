@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
+import type { ActionFormState } from "@/lib/action-state";
 import {
   addManualDish,
   addRecipeToCurrentMenu,
@@ -11,17 +12,17 @@ import {
   createFamilyActionData,
   joinFamilyActionData,
   leaveCurrentFamilySession,
+  leaveUserSession,
   publishCurrentMenu,
   removeMenuDish,
+  savePresetMenu,
   saveDinnerRequest,
-  switchActiveMode,
-  toggleMenuItemChefApproval,
+  selectFamilyActionData,
+  signInWithUserCodeActionData,
+  switchMemberHomeView,
   submitDishFeedback,
+  toggleMenuItemChefApproval,
 } from "@/lib/data";
-import {
-  type ActionFormState,
-} from "@/lib/action-state";
-import type { ActiveMode } from "@/lib/session";
 import { setSession } from "@/lib/session";
 
 function successState(message: string): ActionFormState {
@@ -47,16 +48,36 @@ function getActionFormData(
   return maybeStateOrFormData instanceof FormData ? maybeStateOrFormData : maybeFormData;
 }
 
+function revalidateFamilyViews() {
+  revalidatePath("/families");
+  revalidatePath("/family");
+  revalidatePath("/chef");
+  revalidatePath("/history");
+  revalidatePath("/settings");
+}
+
+export async function signInWithUserCodeAction(formData: FormData) {
+  const launch = await signInWithUserCodeActionData(formData);
+  await setSession(launch.session);
+  redirect(launch.landingPath);
+}
+
 export async function createFamilyAction(formData: FormData) {
-  const session = await createFamilyActionData(formData);
-  await setSession(session);
-  redirect("/family");
+  const launch = await createFamilyActionData(formData);
+  await setSession(launch.session);
+  redirect(launch.landingPath);
 }
 
 export async function joinFamilyAction(formData: FormData) {
-  const session = await joinFamilyActionData(formData);
-  await setSession(session);
-  redirect("/family");
+  const launch = await joinFamilyActionData(formData);
+  await setSession(launch.session);
+  redirect(launch.landingPath);
+}
+
+export async function enterFamilyAction(formData: FormData) {
+  const launch = await selectFamilyActionData(formData);
+  await setSession(launch.session);
+  redirect(launch.landingPath);
 }
 
 export async function submitDinnerRequestAction(
@@ -73,13 +94,13 @@ export async function submitDinnerRequestAction(
     const ok = await saveDinnerRequest(formData);
 
     if (!ok) {
-      return errorState("当前模式下不能提交想法。");
+      return errorState("当前状态下还不能提交今晚想法。");
     }
 
-    revalidatePath("/family");
-    return successState("已保存，并追加到今天的想吃清单。");
+    revalidateFamilyViews();
+    return successState("今晚想吃什么已经记下了。");
   } catch {
-    return errorState("保存想法失败，请稍后重试。");
+    return errorState("保存失败，请稍后再试。");
   }
 }
 
@@ -97,13 +118,13 @@ export async function adoptRecommendationAction(
     const ok = await adoptRecommendation(String(formData.get("recipeIds") ?? ""));
 
     if (!ok) {
-      return errorState("当前模式下不能采用推荐菜单。");
+      return errorState("当前还不能直接采用推荐方案。");
     }
 
-    revalidatePath("/family");
-    return successState("已采用这套菜单。");
+    revalidateFamilyViews();
+    return successState("这套推荐已经放进今晚菜单。");
   } catch {
-    return errorState("采用推荐菜单失败，请稍后重试。");
+    return errorState("采用推荐失败，请稍后再试。");
   }
 }
 
@@ -121,13 +142,13 @@ export async function addRecipeToMenuAction(
     const ok = await addRecipeToCurrentMenu(String(formData.get("recipeId") ?? ""));
 
     if (!ok) {
-      return errorState("当前模式下不能添加这道菜。");
+      return errorState("当前还不能加这道菜。");
     }
 
-    revalidatePath("/family");
-    return successState("已加入今晚菜单。");
+    revalidateFamilyViews();
+    return successState("已经加入今晚菜单。");
   } catch {
-    return errorState("添加菜品失败，请稍后重试。");
+    return errorState("加菜失败，请稍后再试。");
   }
 }
 
@@ -145,13 +166,13 @@ export async function addManualDishAction(
     const ok = await addManualDish(formData);
 
     if (!ok) {
-      return errorState("请填写菜名，或切换到厨师模式再提交。");
+      return errorState("请先补全菜名，或确认你有菜单编辑权限。");
     }
 
-    revalidatePath("/family");
-    return successState("已添加到今晚菜单。");
+    revalidateFamilyViews();
+    return successState("临时新菜已经加入今晚菜单。");
   } catch {
-    return errorState("添加自定义菜失败，请稍后重试。");
+    return errorState("添加失败，请稍后再试。");
   }
 }
 
@@ -169,13 +190,13 @@ export async function removeMenuDishAction(
     const ok = await removeMenuDish(String(formData.get("menuItemId") ?? ""));
 
     if (!ok) {
-      return errorState("当前模式下不能删除菜品。");
+      return errorState("当前还不能移除这道菜。");
     }
 
-    revalidatePath("/family");
-    return successState("已从今晚菜单移除。");
+    revalidateFamilyViews();
+    return successState("已经从今晚菜单移除。");
   } catch {
-    return errorState("删除菜品失败，请稍后重试。");
+    return errorState("删除失败，请稍后再试。");
   }
 }
 
@@ -190,14 +211,34 @@ export async function publishMenuAction(
     const ok = await publishCurrentMenu();
 
     if (!ok) {
-      return errorState("请先添加菜单内容，再确认今晚菜单。");
+      return errorState("请先确认今晚菜单里至少有一道菜。");
     }
 
-    revalidatePath("/family");
-    revalidatePath("/history");
-    return successState("今晚菜单已确认。");
+    revalidateFamilyViews();
+    return successState("今晚菜单已经确认发布。");
   } catch {
-    return errorState("确认今晚菜单失败，请稍后重试。");
+    return errorState("确认菜单失败，请稍后再试。");
+  }
+}
+
+export async function savePresetMenuAction(
+  prevStateOrFormData: ActionFormState | FormData,
+  maybeFormData?: FormData,
+) {
+  void prevStateOrFormData;
+  void maybeFormData;
+
+  try {
+    const ok = await savePresetMenu();
+
+    if (!ok) {
+      return errorState("请先确认今晚菜单里至少有一道菜，再保存为预设菜单。");
+    }
+
+    revalidateFamilyViews();
+    return successState("这版菜单已经保存为今晚预设，干饭人现在可以先参考。");
+  } catch {
+    return errorState("保存预设菜单失败，请稍后再试。");
   }
 }
 
@@ -215,14 +256,13 @@ export async function submitFeedbackAction(
     const ok = await submitDishFeedback(formData);
 
     if (!ok) {
-      return errorState("反馈内容不完整，暂时无法提交。");
+      return errorState("反馈内容还不完整。");
     }
 
-    revalidatePath("/family");
-    revalidatePath("/history");
+    revalidateFamilyViews();
     return successState("晚餐反馈已保存。");
   } catch {
-    return errorState("提交反馈失败，请稍后重试。");
+    return errorState("提交反馈失败，请稍后再试。");
   }
 }
 
@@ -240,41 +280,13 @@ export async function approveMemberAction(
     const ok = await approvePendingMember(String(formData.get("memberId") ?? ""));
 
     if (!ok) {
-      return errorState("当前模式下不能审批成员。");
+      return errorState("当前没有权限处理成员审核。");
     }
 
-    revalidatePath("/family");
-    revalidatePath("/settings");
-    return successState("已通过成员加入申请。");
+    revalidateFamilyViews();
+    return successState("成员已通过加入审核。");
   } catch {
-    return errorState("审批失败，请稍后重试。");
-  }
-}
-
-export async function switchActiveModeAction(
-  prevStateOrFormData: ActionFormState | FormData,
-  maybeFormData?: FormData,
-) {
-  const formData = getActionFormData(prevStateOrFormData, maybeFormData);
-
-  if (!formData) {
-    return errorState("切换工作模式失败。");
-  }
-
-  const mode = String(formData.get("mode") ?? "DINER");
-  const nextMode: ActiveMode = mode === "CHEF" ? "CHEF" : "DINER";
-
-  try {
-    const ok = await switchActiveMode(nextMode);
-
-    if (!ok) {
-      return errorState("切换工作模式失败。");
-    }
-
-    revalidatePath("/family");
-    return successState(nextMode === "CHEF" ? "已切换为厨师模式。" : "已切换为干饭人模式。");
-  } catch {
-    return errorState("切换工作模式失败。");
+    return errorState("审核失败，请稍后再试。");
   }
 }
 
@@ -285,24 +297,41 @@ export async function toggleMenuItemChefApprovalAction(
   const formData = getActionFormData(prevStateOrFormData, maybeFormData);
 
   if (!formData) {
-    return errorState("更新厨师同意状态失败。");
+    return errorState("提交内容为空。");
   }
 
   try {
     const ok = await toggleMenuItemChefApproval(String(formData.get("menuItemId") ?? ""));
 
     if (!ok) {
-      return errorState("当前模式下不能更新厨师同意状态。");
+      return errorState("当前还不能更新这道菜的确认状态。");
     }
 
-    revalidatePath("/family");
-    return successState("已更新厨师同意状态。");
+    revalidateFamilyViews();
+    return successState("厨师确认状态已更新。");
   } catch {
-    return errorState("更新厨师同意状态失败，请稍后重试。");
+    return errorState("更新失败，请稍后再试。");
   }
 }
 
 export async function switchFamilyAction() {
   await leaveCurrentFamilySession();
+  redirect("/families");
+}
+
+export async function switchToChefViewAction() {
+  const landingPath = await switchMemberHomeView("CHEF");
+  revalidateFamilyViews();
+  redirect(landingPath ?? "/family");
+}
+
+export async function switchToFamilyViewAction() {
+  const landingPath = await switchMemberHomeView("FAMILY");
+  revalidateFamilyViews();
+  redirect(landingPath ?? "/family");
+}
+
+export async function useDifferentUserCodeAction() {
+  await leaveUserSession();
   redirect("/");
 }

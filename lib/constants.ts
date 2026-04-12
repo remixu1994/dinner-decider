@@ -9,7 +9,7 @@ export const PRESET_TAGS = [
   "清淡",
   "下饭",
   "汤品",
-];
+] as const;
 
 export const FLAVOR_OPTIONS = ["清淡一点", "正常就好", "重口一点"] as const;
 export const PORTION_OPTIONS = ["少一点", "刚刚好", "多一点"] as const;
@@ -32,6 +32,7 @@ export const JOIN_POLICY_LABELS = {
 export const MENU_STATUS_LABELS = {
   COLLECTING: "待收集想法",
   PLANNING: "待厨师确认",
+  PRESET: "已存为预设菜单",
   PUBLISHED: "已发布待用餐",
   FEEDBACK: "待反馈",
   COMPLETED: "已完成",
@@ -69,7 +70,7 @@ export const DEFAULT_RECIPES = [
     ],
   },
   {
-    name: "土豆炖牛肉",
+    name: "土豆炖牛腩",
     servings: 4,
     tags: ["家常", "下饭"],
     ingredients: [

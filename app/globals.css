@@ -1,11 +1,16 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f8f2e8;
-  --surface: rgba(255, 252, 247, 0.92);
-  --foreground: #1f1a17;
-  --muted: #6b625b;
-  --ring: #e77b49;
+  --background: #f8efe3;
+  --surface: rgba(255, 251, 245, 0.92);
+  --card: rgba(255, 255, 255, 0.9);
+  --foreground: #201814;
+  --muted: #71675f;
+  --ring: #dc6c3f;
+  --accent: #dc6c3f;
+  --accent-soft: #f6d4c5;
+  --sage: #dfe8d4;
+  --line: rgba(113, 103, 95, 0.14);
 }
 
 @theme inline {
@@ -19,13 +24,18 @@
   box-sizing: border-box;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
   background-image:
-    radial-gradient(circle at top left, rgba(255, 184, 108, 0.28), transparent 28%),
-    radial-gradient(circle at bottom right, rgba(129, 190, 148, 0.2), transparent 26%);
+    radial-gradient(circle at top left, rgba(243, 162, 95, 0.24), transparent 28%),
+    radial-gradient(circle at bottom right, rgba(157, 185, 140, 0.18), transparent 30%);
+  background-attachment: fixed;
 }
 
 a {
@@ -49,12 +59,62 @@ textarea:focus {
 }
 
 ::selection {
-  background: rgba(231, 123, 73, 0.2);
+  background: rgba(220, 108, 63, 0.18);
 }
 
 .app-shell {
   min-height: 100vh;
   padding: 1rem;
+}
+
+.paper-panel {
+  border: 1px solid var(--line);
+  background: var(--card);
+  box-shadow: 0 18px 48px rgba(73, 47, 27, 0.08);
+}
+
+.hero-glow {
+  background:
+    radial-gradient(circle at top right, rgba(255, 209, 169, 0.55), transparent 36%),
+    linear-gradient(180deg, rgba(255, 248, 240, 0.96), rgba(255, 252, 248, 0.88));
+}
+
+.accent-wash {
+  background:
+    linear-gradient(135deg, rgba(220, 108, 63, 0.08), rgba(223, 232, 212, 0.26)),
+    rgba(255, 255, 255, 0.94);
+}
+
+.primary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(220, 108, 63, 0.85);
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 12px 28px rgba(220, 108, 63, 0.24);
+  transition:
+    background-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.primary-button:hover {
+  background: #cc5d32;
+  box-shadow: 0 16px 34px rgba(220, 108, 63, 0.3);
+}
+
+.primary-button:focus-visible {
+  outline: 2px solid rgba(220, 108, 63, 0.35);
+  outline-offset: 2px;
+}
+
+.primary-button:disabled,
+.primary-button[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.5;
+  box-shadow: none;
+  transform: none;
 }
 
 @media (min-width: 640px) {

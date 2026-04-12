@@ -7,6 +7,15 @@ datasource db {
   provider = "sqlite"
 }
 
+model User {
+  id        String   @id
+  code      String   @unique
+  createdAt String   @map("created_at")
+  members   Member[]
+
+  @@map("users")
+}
+
 model Family {
   id              String          @id
   name            String
@@ -23,18 +32,22 @@ model Family {
 }
 
 model Member {
-  id               String          @id
-  familyId         String          @map("family_id")
-  nickname         String
-  role             String
-  isOwner          Boolean         @default(false) @map("is_owner")
-  status           String
-  createdAt        String          @map("created_at")
-  family           Family          @relation(fields: [familyId], references: [id], onDelete: Cascade)
-  dinnerRequests   DinnerRequest[]
-  publishedMenus   Menu[]          @relation("PublishedMenus")
-  dishFeedback     DishFeedback[]
+  id             String          @id
+  userId         String          @map("user_id")
+  familyId       String          @map("family_id")
+  nickname       String
+  role           String
+  isOwner        Boolean         @default(false) @map("is_owner")
+  preferredHomeView String?      @map("preferred_home_view")
+  status         String
+  createdAt      String          @map("created_at")
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  family         Family          @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  dinnerRequests DinnerRequest[]
+  publishedMenus Menu[]          @relation("PublishedMenus")
+  dishFeedback   DishFeedback[]
 
+  @@unique([familyId, userId])
   @@map("members")
 }
 
@@ -45,6 +58,7 @@ model DinnerRequest {
   dinnerDate          String   @map("dinner_date")
   desiredDishes       String   @default("[]") @map("desired_dishes")
   dislikes            String   @default("[]")
+  note                String?
   flavorPreference    String   @default("正常就好") @map("flavor_preference")
   portionPreference   String   @default("刚刚好") @map("portion_preference")
   tagPreferences      String   @default("[]") @map("tag_preferences")
@@ -88,10 +102,10 @@ model RecipeIngredient {
 }
 
 model RecipeTag {
-  id       String  @id
-  recipeId String  @map("recipe_id")
+  id       String @id
+  recipeId String @map("recipe_id")
   tag      String
-  recipe   Recipe  @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  recipe   Recipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
 
   @@map("recipe_tags")
 }

@@ -7,7 +7,6 @@ import { useRouter } from "next/navigation";
 
 import type { ActionFormState } from "@/lib/action-state";
 import { INITIAL_ACTION_STATE } from "@/lib/action-state";
-import type { ActiveMode } from "@/lib/session";
 
 type ServerFormAction = (
   state: ActionFormState,
@@ -161,59 +160,6 @@ export function InlineActionButtonForm({
           className={messageClassName ?? "mt-2"}
         />
       ) : null}
-    </form>
-  );
-}
-
-function ModeButton({
-  mode,
-  currentMode,
-  label,
-}: {
-  mode: ActiveMode;
-  currentMode: ActiveMode;
-  label: string;
-}) {
-  const { pending } = useFormStatus();
-  const isActive = currentMode === mode;
-
-  return (
-    <button
-      type="submit"
-      name="mode"
-      value={mode}
-      disabled={pending}
-      className={`rounded-full px-4 py-2 text-sm font-medium transition ${
-        isActive
-          ? "bg-stone-950 text-white shadow-[0_10px_24px_rgba(41,31,24,0.18)]"
-          : "bg-white text-stone-700 hover:bg-stone-100"
-      } ${pending ? "opacity-70" : ""}`}
-    >
-      {pending && isActive ? "切换中..." : label}
-    </button>
-  );
-}
-
-export function ModeSwitchForm({
-  action,
-  activeMode,
-}: {
-  action: ServerFormAction;
-  activeMode: ActiveMode;
-}) {
-  const [state, formAction] = useActionState(action, INITIAL_ACTION_STATE);
-  const visibleState = useTransientActionState(state);
-
-  return (
-    <form
-      action={formAction}
-      className="inline-flex flex-col items-start gap-2 rounded-full border border-stone-200 bg-[rgba(255,255,255,0.72)] p-1 shadow-sm"
-    >
-      <div className="flex items-center gap-1">
-        <ModeButton mode="DINER" currentMode={activeMode} label="干饭人模式" />
-        <ModeButton mode="CHEF" currentMode={activeMode} label="厨师模式" />
-      </div>
-      <FeedbackMessage state={visibleState} className="px-3 pb-1 text-xs" />
     </form>
   );
 }

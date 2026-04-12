@@ -5,7 +5,7 @@ import { approveMemberAction } from "@/app/actions";
 import { InlineActionButtonForm } from "@/components/action-forms";
 import { SectionCard, TagChip } from "@/components/ui";
 import { JOIN_POLICY_LABELS, MEMBER_ROLE_LABELS } from "@/lib/constants";
-import { getSettingsData } from "@/lib/data";
+import { getSessionLandingPath, getSettingsData } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
 
@@ -13,55 +13,54 @@ export default async function SettingsPage() {
   const settings = await getSettingsData();
 
   if (!settings) {
-    redirect("/");
+    redirect((await getSessionLandingPath()) ?? "/");
   }
-
-  const canApprove =
-    settings.currentMember.isOwner || settings.currentMember.role === "CHEF";
 
   return (
     <main className="app-shell">
       <div className="mx-auto max-w-5xl space-y-5">
-        <header className="flex flex-col gap-3 rounded-[32px] border border-stone-200 bg-[var(--surface)] p-6 shadow-sm md:flex-row md:items-center md:justify-between">
-          <div>
-            <p className="text-sm font-medium text-stone-500">家庭设置</p>
-            <h1 className="mt-1 text-3xl font-semibold text-stone-950">
-              {settings.family.name}
-            </h1>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <TagChip label={`家庭码 ${settings.family.code}`} tone="accent" />
-              <TagChip
-                label={
-                  JOIN_POLICY_LABELS[
-                    settings.family.joinPolicy as "OPEN" | "APPROVAL"
-                  ]
-                }
-                tone="soft"
-              />
+        <header className="paper-panel hero-glow rounded-[34px] border p-6">
+          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div>
+              <p className="text-sm font-medium text-stone-500">家庭设置</p>
+              <h1 className="mt-1 text-3xl font-semibold text-stone-950">
+                {settings.family.name}
+              </h1>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <TagChip label={`用户码 ${settings.user.code}`} tone="soft" />
+                <TagChip label={`家庭码 ${settings.family.code}`} tone="accent" />
+                <TagChip
+                  label={JOIN_POLICY_LABELS[settings.family.joinPolicy as "OPEN" | "APPROVAL"]}
+                  tone="soft"
+                />
+              </div>
             </div>
-          </div>
-          <div className="flex gap-2">
-            <Link
-              href="/family"
-              className="rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm font-medium text-stone-700"
-            >
-              回到今晚页面
-            </Link>
-            <Link
-              href="/history"
-              className="rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm font-medium text-stone-700"
-            >
-              查看历史
-            </Link>
+            <div className="flex flex-wrap gap-2">
+              <Link
+                href={settings.currentMember.homePath}
+                className="primary-button rounded-2xl px-4 py-3 text-sm font-semibold"
+              >
+                回到首页
+              </Link>
+              <Link
+                href="/history"
+                className="rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm font-medium text-stone-700"
+              >
+                查看历史
+              </Link>
+            </div>
           </div>
         </header>
 
-        <SectionCard title="家庭成员" description="角色一目了然，便于知道谁可以最终发今晚菜单。">
+        <SectionCard
+          title="家庭成员"
+          description="这里能快速看清谁负责做决定，谁还在待审核。"
+        >
           <div className="grid gap-3">
             {settings.members.map((member) => (
               <article
                 key={member.id}
-                className="flex flex-col gap-3 rounded-3xl border border-stone-200 bg-stone-50 p-4 md:flex-row md:items-center md:justify-between"
+                className="flex flex-col gap-3 rounded-[28px] border border-stone-200 bg-stone-50 p-4 md:flex-row md:items-center md:justify-between"
               >
                 <div>
                   <h2 className="text-base font-semibold text-stone-950">{member.nickname}</h2>
@@ -84,7 +83,10 @@ export default async function SettingsPage() {
           </div>
         </SectionCard>
 
-        <SectionCard title="待审核成员" description="只有厨师或家庭创建者可以通过审核。">
+        <SectionCard
+          title="待审核成员"
+          description="只有厨师或家庭创建者可以通过成员审核。"
+        >
           {settings.pendingMembers.length === 0 ? (
             <p className="text-sm text-stone-500">当前没有待审核成员。</p>
           ) : (
@@ -92,7 +94,7 @@ export default async function SettingsPage() {
               {settings.pendingMembers.map((member) => (
                 <article
                   key={member.id}
-                  className="flex flex-col gap-3 rounded-3xl border border-stone-200 bg-stone-50 p-4 md:flex-row md:items-center md:justify-between"
+                  className="flex flex-col gap-3 rounded-[28px] border border-stone-200 bg-stone-50 p-4 md:flex-row md:items-center md:justify-between"
                 >
                   <div>
                     <h2 className="text-base font-semibold text-stone-950">{member.nickname}</h2>
@@ -100,18 +102,18 @@ export default async function SettingsPage() {
                       申请角色：{MEMBER_ROLE_LABELS[member.role as "CHEF" | "DINER"]}
                     </p>
                   </div>
-                  {canApprove ? (
+                  {settings.currentMember.canApproveMembers ? (
                     <InlineActionButtonForm
                       action={approveMemberAction}
                       label="通过加入"
                       pendingLabel="处理中..."
-                      buttonClassName="rounded-2xl bg-stone-950 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
+                      buttonClassName="primary-button rounded-2xl px-4 py-3 text-sm font-semibold"
                       messageClassName="mt-2 text-xs"
                     >
                       <input type="hidden" name="memberId" value={member.id} />
                     </InlineActionButtonForm>
                   ) : (
-                    <TagChip label="你暂无审核权限" tone="soft" />
+                    <TagChip label="你暂时没有审核权限" tone="soft" />
                   )}
                 </article>
               ))}
