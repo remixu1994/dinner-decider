@@ -1,0 +1,30 @@
+
+> dinner-decider@0.1.0 dev
+> next dev
+
+▲ Next.js 16.2.3 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://192.168.31.146:3000
+✓ Ready in 902ms
+
+ GET / 200 in 825ms (next.js: 266ms, application-code: 558ms)
+ GET / 200 in 151ms (next.js: 9ms, application-code: 142ms)
+ GET / 200 in 87ms (next.js: 6ms, application-code: 81ms)
+ GET / 200 in 132ms (next.js: 7ms, application-code: 125ms)
+ GET /chef 200 in 264ms (next.js: 66ms, application-code: 199ms)
+ POST / 303 in 525ms (next.js: 4ms, application-code: 522ms)
+  └─ ƒ createFamilyAction({}) in 220ms app/actions.ts
+ GET /settings 200 in 132ms (next.js: 59ms, application-code: 73ms)
+ GET /chef 200 in 94ms (next.js: 4ms, application-code: 90ms)
+✓ Compiled in 54ms
+✓ Compiled in 74ms
+✓ Compiled in 48ms
+✓ Compiled in 36ms
+✓ Compiled in 40ms
+✓ Compiled in 37ms
+✓ Compiled in 56ms
+✓ Compiled in 49ms
+✓ Compiled in 47ms
+✓ Compiled in 123ms
+✓ Compiled in 92ms
+✓ Compiled in 41ms
